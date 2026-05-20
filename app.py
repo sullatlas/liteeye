@@ -6,7 +6,6 @@ import os
 import base64
 import numpy as np
 from transformers import CLIPProcessor, CLIPModel
-from PIL import Image
 
 st.set_page_config(page_title="轻眸LiteEye", layout="wide")
 st.title("轻眸LiteEye - AI视频语义检索")
@@ -31,11 +30,17 @@ model, processor = load_model()
 uploaded_file = st.file_uploader("选择视频文件", type=["mp4", "avi", "mov"])
 
 if uploaded_file is not None:
+    # 保存视频到临时文件，但保留引用
     tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
     tfile.write(uploaded_file.read())
     video_path = tfile.name
     
     st.video(video_path)
+    
+    # 将视频文件内容保存到 session_state，供后续使用
+    uploaded_file.seek(0)
+    st.session_state['video_bytes'] = uploaded_file.read()
+    st.session_state['video_path'] = video_path
     
     if st.button("开始索引视频"):
         with st.spinner("正在分析视频，请稍候..."):
@@ -56,7 +61,7 @@ if uploaded_file is not None:
                 if frame_count % frame_interval == 0:
                     time_seconds = frame_count / fps
                     
-                    # 方法：保存图片 base64，搜索时再计算特征
+                    # 保存图片 base64
                     small_frame = cv2.resize(frame, (224, 224))
                     _, buffer = cv2.imencode('.jpg', small_frame)
                     img_base64 = base64.b64encode(buffer).decode('utf-8')
@@ -67,15 +72,14 @@ if uploaded_file is not None:
                     })
                 
                 frame_count += 1
-                if frame_count % 30 == 0:
+                if frame_count % 30 == 0 and total_frames > 0:
                     progress_bar.progress(min(frame_count / total_frames, 1.0))
             
             cap.release()
             st.session_state['index'] = index
             st.success(f"✅ 完成！共分析 {len(index)} 个画面")
-            os.unlink(video_path)
     
-    query = st.text_input("🔍 搜索画面内容（英文）", placeholder="例如：dog, cat, sky, person, car, beach")
+    query = st.text_input("🔍 搜索画面内容（英文）", placeholder="例如：dog, cat, sky, person, car")
     
     if query and 'index' in st.session_state:
         with st.spinner("搜索中..."):
@@ -100,4 +104,5 @@ if uploaded_file is not None:
             st.subheader("搜索结果")
             for i, r in enumerate(top_results):
                 with st.expander(f"🎬 结果 {i+1}: 第 {r['time']:.1f} 秒 (匹配度: {r['score']:.3f})"):
-                    st.video(video_path, start_time=r['time'])
+                    # 使用视频文件路径
+                    st.video(st.session_state['video_path'], start_time=r['time'])
